@@ -14,6 +14,9 @@ parameters:
 - name: useUtf8JsonBytes
   type: boolean
   default: false
+- name: testInvalidJson
+  type: boolean
+  default: false
 
 variables:
   GitHubOwner: sanjays-ms
@@ -105,5 +108,50 @@ steps:
       }
       $releaseCreated = Invoke-RestMethod @releaseParams
       Write-Host "Created test release $($releaseCreated.tag_name) with ID $($releaseCreated.id)."
+  env:
+    TEST_GITHUB_TOKEN: $(TestGithubToken)
+
+- task: PowerShell@2
+  displayName: Confirm GitHub rejects malformed JSON
+  condition: and(succeeded(), eq('${{ parameters.testInvalidJson }}', 'true'))
+  inputs:
+    targetType: inline
+    pwsh: true
+    script: |
+      if ('${{ parameters.createTestGithubRelease }}' -eq 'true') {
+        throw "Run the invalid-JSON check separately with createTestGithubRelease=false."
+      }
+      if ([string]::IsNullOrWhiteSpace($env:TEST_GITHUB_TOKEN)) {
+        throw "TEST_GITHUB_TOKEN must be configured as a secret pipeline variable."
+      }
+
+      $invalidJson = '{"tag_name":"v${{ parameters.agentVersion }}","name":"Malformed JSON"'
+      $requestParams = @{
+        Uri = "https://api.github.com/repos/$(GitHubOwner)/$(GitHubRepo)/releases";
+        Method = 'POST';
+        Headers = @{
+          Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("vsts:$($env:TEST_GITHUB_TOKEN)"));
+        }
+        ContentType = 'application/json; charset=utf-8';
+        Body = [System.Text.Encoding]::UTF8.GetBytes($invalidJson);
+      }
+
+      try {
+        Invoke-RestMethod @requestParams | Out-Null
+        throw "GitHub unexpectedly accepted malformed JSON."
+      }
+      catch {
+        if (-not $_.Exception.Response) {
+          throw
+        }
+
+        $statusCode = [int]$_.Exception.Response.StatusCode
+        $responseBody = $_.ErrorDetails.Message
+        if ($statusCode -ne 400 -or $responseBody -notmatch 'Problems parsing JSON') {
+          throw "Expected GitHub's JSON parse error; got HTTP $statusCode. $responseBody"
+        }
+
+        Write-Host "GitHub rejected malformed JSON with the expected HTTP 400 response."
+      }
   env:
     TEST_GITHUB_TOKEN: $(TestGithubToken)
