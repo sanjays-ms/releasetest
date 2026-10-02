@@ -51,14 +51,14 @@ steps:
 - script: |
     cd release
     node fillReleaseNotesTemplate.js ${{ parameters.agentVersion }}
-    node tests/verifyReleasePayload.js
+    node tests/verifyReleasePayload.js ${{ parameters.useUtf8JsonBytes }}
   displayName: Fill test release notes and verify payload encoding
 
 - task: PowerShell@2
   displayName: Validate or create a test GitHub release
   inputs:
     targetType: inline
-    pwsh: false
+    pwsh: true
     script: |
       $releaseNotes = [System.IO.File]::ReadAllText("$(Build.SourcesDirectory)\releaseNote.md")
       $releaseData = @{

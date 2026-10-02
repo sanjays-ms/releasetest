@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const expectedNotes = fs.readFileSync(path.join(__dirname, '..', '..', 'releaseNote.md'), 'utf8');
+const useUtf8JsonBytes = process.argv[2] === 'true';
 let server;
 let child;
 
@@ -44,7 +45,7 @@ server = http.createServer((request, response) => {
 server.on('error', error => fail(`Local payload server failed: ${error.message}`));
 server.listen(0, '127.0.0.1', () => {
     const url = `http://127.0.0.1:${server.address().port}/releases`;
-    child = spawn('powershell.exe', [
+    child = spawn('pwsh.exe', [
         '-NoLogo',
         '-NoProfile',
         '-NonInteractive',
@@ -55,11 +56,12 @@ server.listen(0, '127.0.0.1', () => {
             ...process.env,
             CAPTURE_URL: url,
             RELEASE_NOTES_PATH: path.join(__dirname, '..', '..', 'releaseNote.md'),
+            USE_UTF8_JSON_BYTES: useUtf8JsonBytes ? 'true' : 'false',
         },
         stdio: 'inherit',
     });
 
-    child.on('error', error => fail(`Could not start Windows PowerShell: ${error.message}`));
+    child.on('error', error => fail(`Could not start PowerShell Core: ${error.message}`));
     child.on('exit', code => {
         if (code !== 0) {
             process.exitCode = 1;

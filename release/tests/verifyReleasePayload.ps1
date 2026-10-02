@@ -8,10 +8,19 @@ $releaseData = @{
     prerelease = $true
 }
 $releaseJson = ConvertTo-Json -InputObject $releaseData -Compress
+if ($env:USE_UTF8_JSON_BYTES -eq 'true') {
+    $requestBody = [System.Text.Encoding]::UTF8.GetBytes($releaseJson)
+    $contentType = 'application/json; charset=utf-8'
+}
+else {
+    $requestBody = $releaseJson
+    $contentType = 'application/json'
+}
+
 $releaseParams = @{
     Uri = $env:CAPTURE_URL
     Method = 'POST'
-    ContentType = 'application/json; charset=utf-8'
-    Body = [System.Text.Encoding]::UTF8.GetBytes($releaseJson)
+    ContentType = $contentType
+    Body = $requestBody
 }
 Invoke-RestMethod @releaseParams | Out-Null
