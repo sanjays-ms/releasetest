@@ -1,0 +1,109 @@
+trigger: none
+pr: none
+
+parameters:
+- name: agentVersion
+  type: string
+  default: '3.000.999'
+- name: createTestGithubRelease
+  type: boolean
+  default: false
+- name: pushTestReleaseBranch
+  type: boolean
+  default: false
+- name: useUtf8JsonBytes
+  type: boolean
+  default: false
+
+variables:
+  GitHubOwner: sanjays-ms
+  GitHubRepo: releasetest
+
+pool:
+  vmImage: windows-2022
+
+steps:
+- checkout: self
+
+- task: UseNode@1
+  displayName: Use Node 20.20.2
+  inputs:
+    version: '20.20.2'
+
+- script: |
+    cd release
+    npm ci
+    node createReleaseBranch.js --help
+  displayName: Install release dependencies and run isolated checks
+
+- script: |
+    cd release
+    node createReleaseBranch.js ${{ parameters.agentVersion }} --derivedFrom=latest --branch=main --targetCommitId=$(Build.SourceVersion)
+  displayName: Push test release branch
+  condition: and(succeeded(), eq('${{ parameters.pushTestReleaseBranch }}', 'true'))
+  env:
+    EDITOR: cat
+    PAT: $(TestGithubToken)
+    GITHUB_OWNER: $(GitHubOwner)
+    GITHUB_REPO: $(GitHubRepo)
+    TEST_SKIP_PR_LOOKUP: 'true'
+
+- script: |
+    cd release
+    node fillReleaseNotesTemplate.js ${{ parameters.agentVersion }}
+    node tests/verifyReleasePayload.js
+  displayName: Fill test release notes and verify payload encoding
+
+- task: PowerShell@2
+  displayName: Validate or create a test GitHub release
+  inputs:
+    targetType: inline
+    pwsh: false
+    script: |
+      $releaseNotes = [System.IO.File]::ReadAllText("$(Build.SourcesDirectory)\releaseNote.md")
+      $releaseData = @{
+        tag_name = "v${{ parameters.agentVersion }}";
+        target_commitish = "$(Build.SourceVersion)";
+        name = "v${{ parameters.agentVersion }}";
+        body = $releaseNotes;
+        draft = $false;
+        prerelease = $true;
+      }
+      $releaseJson = ConvertTo-Json -InputObject $releaseData -Compress
+      $parsedReleaseData = ConvertFrom-Json -InputObject $releaseJson -ErrorAction Stop
+      if ($parsedReleaseData.body -ne $releaseNotes) {
+        throw "Serialized release JSON did not preserve the notes."
+      }
+
+      Write-Host "Release request JSON is valid. UTF-8 payload bytes: $([System.Text.Encoding]::UTF8.GetByteCount($releaseJson))"
+
+      if ('${{ parameters.createTestGithubRelease }}' -ne 'true') {
+        Write-Host "GitHub write disabled. Set createTestGithubRelease=true to send this request to the dummy repo."
+        exit 0
+      }
+      if ([string]::IsNullOrWhiteSpace($env:TEST_GITHUB_TOKEN)) {
+        throw "TEST_GITHUB_TOKEN must be configured as a secret pipeline variable."
+      }
+
+      if ('${{ parameters.useUtf8JsonBytes }}' -eq 'true') {
+        $requestBody = [System.Text.Encoding]::UTF8.GetBytes($releaseJson)
+        $contentType = 'application/json; charset=utf-8'
+      }
+      else {
+        $requestBody = $releaseJson
+        $contentType = 'application/json'
+      }
+
+      $releaseParams = @{
+        Uri = "https://api.github.com/repos/$(GitHubOwner)/$(GitHubRepo)/releases";
+        Method = 'POST';
+        Headers = @{
+          Authorization = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("vsts:$($env:TEST_GITHUB_TOKEN)"));
+        }
+        ContentType = $contentType;
+        Body = $requestBody;
+      }
+      $releaseCreated = Invoke-RestMethod @releaseParams
+      Write-Host "Created test release $($releaseCreated.tag_name) with ID $($releaseCreated.id)."
+  env:
+    TEST_GITHUB_TOKEN: $(TestGithubToken)
