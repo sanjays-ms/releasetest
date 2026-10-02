@@ -1,11 +1,11 @@
 {
   "private": true,
   "devDependencies": {
-    "@octokit/rest": "^22.0.1",
+    "@octokit/rest": "22.0.1",
     "@octokit/graphql": "9.0.4",
-    "azure-devops-node-api": "^17.0.1",
-    "azure-pipelines-task-lib": "^5.281.0",
-    "got": "^11.8.6",
-    "node-getopt": "^0.3.2"
+    "azure-devops-node-api": "17.0.1",
+    "azure-pipelines-task-lib": "5.281.0",
+    "got": "11.8.6",
+    "node-getopt": "0.3.2"
   }
 }
